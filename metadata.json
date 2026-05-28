@@ -1,0 +1,10 @@
+{
+  "name": "SmartStock",
+  "description": "Gestão Inteligente de Estoque com Câmera IA, controle por voz, painéis em tempo real e chat de suporte integrado.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
