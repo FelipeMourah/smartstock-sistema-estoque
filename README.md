@@ -1,66 +1,117 @@
-# SmartStock
+# 📦 SmartStock
 
-SmartStock é uma plataforma full-stack de gestão de estoque construída para pequenas empresas e mercearias que precisam de controle rápido, visualização inteligente e suporte offline.
+![Status](https://img.shields.io/badge/status-em%20desenvolvimento-blue)
+![React](https://img.shields.io/badge/React-18-61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6)
+![SQLite](https://img.shields.io/badge/SQLite-Local-003B57)
+![Express](https://img.shields.io/badge/Express.js-Backend-000000)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## Visão Geral
+## 🚀 Sobre o Projeto
 
-O projeto combina:
-- Frontend React com TypeScript e Vite
-- Backend Express em TypeScript
-- Persistência local em SQLite (`data/db.sqlite`)
-- Câmera inteligente para captura de imagens via webcam
-- Upload de fotos para análise de estoque
-- Comandos por voz com Web Speech API
-- Fluxo de login com código MFA simulado
-- Dashboard de indicadores e relatórios de estoque
+**SmartStock** é uma plataforma full-stack de gestão de estoque desenvolvida para pequenas empresas, mercados e mercearias que necessitam de controle eficiente de produtos, monitoramento em tempo real e suporte offline.
 
-## Recursos Principais
+A aplicação combina recursos modernos de Inteligência Artificial, visão computacional, comandos por voz e sincronização local para oferecer uma experiência simples e produtiva mesmo sem conexão constante com a internet.
 
-- Cadastro, edição e exclusão de produtos
-- Contagem de estoque com alertas de baixo e crítico
-- Sincronização local/offline com cache em `localStorage`
-- Análise via imagem com fallback para IA simulada
-- Assistente virtual de chat com fallback on-premise
-- Painel de configurações com status de servidor, MFA e API
-- Build de produção e empacotamento do backend para deploy
+---
 
-## Tecnologias Utilizadas
+## ✨ Principais Funcionalidades
 
-- React 18 + TypeScript
-- Vite
-- Express.js
-- Tailwind CSS
-- @google/genai (opcional, apenas se `GEMINI_API_KEY` estiver configurada)
-- WebRTC / `navigator.mediaDevices.getUserMedia`
-- Web Speech API
-- `better-sqlite3` / SQLite local para banco de dados
-- Vitest para testes
+### 📦 Gestão de Estoque
 
-## Estrutura do Repositório
+* Cadastro de produtos
+* Edição e exclusão de itens
+* Controle de quantidade em estoque
+* Alertas automáticos para níveis baixos e críticos
 
-- `src/` → frontend React
-- `src/components/` → componentes principais da UI
-- `src/types.ts` → tipos TypeScript compartilhados
-- `server.ts` → backend Express, API e integração com Vite
-- `data/db.sqlite` → banco de dados local SQLite
-- `package.json` → dependências e scripts
-- `tsconfig.json` → configuração TypeScript
-- `vite.config.ts` → configuração de desenvolvimento Vite
-- `.gitignore` → arquivos ignorados, incluindo `data/db.*`
+### 📊 Dashboard Inteligente
 
-## Scripts Disponíveis
+* Indicadores de estoque
+* Relatórios visuais
+* Monitoramento de produtos
 
-- `npm install` → instala dependências
-- `npm run dev` → inicia o servidor de desenvolvimento (Express + Vite)
-- `npm run build` → compila frontend e empacota servidor para produção
-- `npm start` → executa o servidor empacotado em `dist/server.cjs`
-- `npm run lint` → verifica o TypeScript sem gerar saída
-- `npm test` → executa testes com Vitest
-- `npm run test:watch` → executa Vitest em modo observação
+### 📷 Análise por Imagem
 
-## Configuração do Ambiente
+* Captura através da webcam
+* Upload de fotografias
+* Reconhecimento visual com IA
+* Sistema de fallback offline
 
-Crie um arquivo `.env` na raiz do projeto com as variáveis abaixo:
+### 🎤 Comandos por Voz
+
+* Integração com Web Speech API
+* Interpretação de comandos falados
+* Operação mãos livres
+
+### 🔒 Segurança
+
+* Sistema de autenticação
+* MFA (Multi-Factor Authentication)
+* Validação por código temporário
+
+### 🌐 Funcionamento Offline
+
+* Cache local
+* Armazenamento em LocalStorage
+* Sincronização automática quando a conexão retorna
+
+---
+
+## 🏗️ Arquitetura
+
+```text
+Frontend (React + Vite)
+        │
+        ▼
+API Express (TypeScript)
+        │
+        ▼
+SQLite Local (better-sqlite3)
+```
+
+---
+
+## 🛠️ Tecnologias Utilizadas
+
+| Categoria           | Tecnologias                |
+| ------------------- | -------------------------- |
+| Frontend            | React 18, TypeScript, Vite |
+| Backend             | Express.js, Node.js        |
+| Estilização         | Tailwind CSS               |
+| Banco de Dados      | SQLite, better-sqlite3     |
+| IA                  | Google Gemini (Opcional)   |
+| Visão Computacional | Webcam + Upload de Imagens |
+| Voz                 | Web Speech API             |
+| Testes              | Vitest                     |
+
+---
+
+## 📂 Estrutura do Projeto
+
+```text
+SmartStock/
+│
+├── src/
+│   ├── components/
+│   ├── pages/
+│   ├── services/
+│   └── types.ts
+│
+├── data/
+│   └── db.sqlite
+│
+├── server.ts
+├── vite.config.ts
+├── package.json
+├── tsconfig.json
+└── .env
+```
+
+---
+
+## ⚙️ Configuração do Ambiente
+
+Crie um arquivo `.env` na raiz do projeto:
 
 ```env
 PORT=3000
@@ -69,102 +120,223 @@ GEMINI_API_KEY=
 MFA_TIMEOUT_SECONDS=300
 ```
 
-### Variáveis importantes
+### Variáveis
 
-- `PORT` → porta onde o servidor Express irá rodar
-- `NODE_ENV` → define o modo `development` ou `production`
-- `GEMINI_API_KEY` → chave opcional para usar o Gemini AI nas rotas de visão, voz e chat
-- `MFA_TIMEOUT_SECONDS` → tempo de expiração do código MFA
+| Variável            | Descrição                     |
+| ------------------- | ----------------------------- |
+| PORT                | Porta utilizada pelo servidor |
+| NODE_ENV            | Ambiente de execução          |
+| GEMINI_API_KEY      | Chave opcional do Gemini AI   |
+| MFA_TIMEOUT_SECONDS | Tempo de validade do MFA      |
 
-> Se `GEMINI_API_KEY` não estiver definida, o sistema utiliza respostas simuladas e funcionalidades offline.
-## Banco de Dados
+> Caso a chave Gemini não seja informada, o sistema continuará funcionando com respostas simuladas.
 
-A persistência foi migrada para SQLite local via `better-sqlite3`, guardando o arquivo em `data/db.sqlite`.
+---
 
-- Usuários, itens, scans e chats ficam armazenados em tabelas SQLite
-- A aplicação inicializa as tabelas automaticamente ao iniciar
-- O arquivo `data/db.sqlite` fica ignorado pelo `.gitignore`
-## Como Executar Localmente
+## 🚀 Executando Localmente
 
-1. Instale as dependências:
-   ```bash
-   npm install
-   ```
-2. Crie o arquivo `.env` se quiser configurar porta ou IA:
-   ```bash
-   copy nul .env
-   ```
-   Edite o `.env` com as variáveis necessárias.
-3. Inicie o servidor de desenvolvimento:
-   ```bash
-   npm run dev
-   ```
-4. Abra no navegador em:
-   ```
-   http://localhost:3000
-   ```
+### 1. Instalar Dependências
 
-## Build para Produção
+```bash
+npm install
+```
 
-1. Gere o build do frontend e empacote o backend:
-   ```bash
-   npm run build
-   ```
-2. Inicie o servidor empacotado:
-   ```bash
-   npm start
-   ```
-3. Acesse:
-   ```
-   http://localhost:3000
-   ```
+### 2. Criar arquivo .env
 
-## API Principais Endpoints
+```bash
+copy nul .env
+```
 
-- `GET /api/inventory` → lista de produtos
-- `POST /api/inventory/save` → salva ou atualiza um produto
-- `POST /api/inventory/sync` → sincroniza itens offline com o banco
-- `DELETE /api/inventory/:id` → remove item
-- `POST /api/auth/login` → login com MFA
-- `POST /api/auth/register` → cadastro de usuário
-- `POST /api/auth/verify-mfa` → validação do código MFA
-- `POST /api/ai/vision` → análise de imagem / visão computacional
-- `POST /api/ai/voice` → interpretação de comando de voz
-- `POST /api/ai/chat` → assistente virtual inteligente
-- `GET /api/settings/status` → status do backend, Gemini e MFA
-- `GET /api/health` → status de saúde do servidor
+### 3. Iniciar Ambiente de Desenvolvimento
 
+```bash
+npm run dev
+```
 
-## Comportamento Offline
+### 4. Acessar
 
-- O frontend armazena itens em `localStorage`
-- Quando o app detecta reconexão, ele tenta sincronizar com `/api/inventory/sync`
-- A câmera funciona em navegadores que suportam WebRTC
-- O reconhecimento de voz funciona em navegadores que suportam Web Speech API
+```text
+http://localhost:3000
+```
 
-## Como Funciona a IA
+---
 
-- Se `GEMINI_API_KEY` estiver configurada, as rotas de IA usam o Gemini AI para visão, voz e chat
-- Se não houver chave, o backend retorna respostas simuladas e mantém o fluxo funcional
-- A aplicação foi projetada para apresentar valor mesmo sem IA externa
+## 📦 Build para Produção
 
-## Testes
+Gerar build:
 
-Execute:
+```bash
+npm run build
+```
+
+Executar aplicação:
+
+```bash
+npm start
+```
+
+Acesse:
+
+```text
+http://localhost:3000
+```
+
+---
+
+## 📜 Scripts Disponíveis
+
+| Script             | Descrição                         |
+| ------------------ | --------------------------------- |
+| npm run dev        | Ambiente de desenvolvimento       |
+| npm run build      | Build de produção                 |
+| npm start          | Executa versão empacotada         |
+| npm run lint       | Verificação TypeScript            |
+| npm test           | Executa testes                    |
+| npm run test:watch | Executa testes em modo observação |
+
+---
+
+## 🗄️ Banco de Dados
+
+O projeto utiliza **SQLite local** através da biblioteca **better-sqlite3**.
+
+### Tabelas Principais
+
+* Usuários
+* Produtos
+* Scans
+* Conversas do Chat
+* Configurações
+
+Características:
+
+* Inicialização automática
+* Persistência local
+* Sem necessidade de servidor externo
+* Arquivo ignorado pelo Git
+
+```text
+data/db.sqlite
+```
+
+---
+
+## 🔌 Principais Endpoints
+
+### Inventário
+
+```http
+GET    /api/inventory
+POST   /api/inventory/save
+POST   /api/inventory/sync
+DELETE /api/inventory/:id
+```
+
+### Autenticação
+
+```http
+POST /api/auth/login
+POST /api/auth/register
+POST /api/auth/verify-mfa
+```
+
+### Inteligência Artificial
+
+```http
+POST /api/ai/vision
+POST /api/ai/voice
+POST /api/ai/chat
+```
+
+### Sistema
+
+```http
+GET /api/settings/status
+GET /api/health
+```
+
+---
+
+## 🤖 Inteligência Artificial
+
+O SmartStock suporta integração opcional com o Google Gemini.
+
+### Com Gemini configurado
+
+* Análise de imagens
+* Interpretação de voz
+* Assistente inteligente
+* Respostas contextualizadas
+
+### Sem Gemini
+
+* Respostas simuladas
+* Operação offline
+* Fluxos preservados
+* Continuidade da experiência
+
+---
+
+## 📶 Funcionamento Offline
+
+O sistema foi projetado para operar mesmo sem conexão.
+
+### Recursos Disponíveis
+
+✅ Armazenamento Local
+
+✅ Cache de dados
+
+✅ Sincronização automática
+
+✅ Operação por câmera
+
+✅ Gestão de estoque local
+
+---
+
+## 🧪 Testes
+
+Executar todos os testes:
 
 ```bash
 npm test
 ```
 
-O projeto inclui testes básicos de componente com Vitest.
+Executar em modo observação:
 
-## Boas Práticas
+```bash
+npm run test:watch
+```
 
-- Nunca versionar `data/db.sqlite` com dados reais
-- Não colocar chaves de API em commits públicos
-- Utilizar `npm run build` antes de deploy em produção
+---
 
-## Licença
+## 🔐 Boas Práticas
 
-Licença MIT
+* Nunca versionar `data/db.sqlite`
+* Nunca publicar chaves de API
+* Utilizar variáveis de ambiente
+* Executar testes antes do deploy
+* Realizar build de produção antes da publicação
 
+---
+
+## 👨‍💻 Autor
+
+Desenvolvido como projeto académico e de portfólio para demonstrar competências em:
+
+* Desenvolvimento Full Stack
+* TypeScript
+* React
+* Express
+* SQLite
+* Integração com IA
+* Arquitetura Web Moderna
+
+---
+
+## 📄 Licença
+
+Distribuído sob a licença MIT.
+
+Consulte o arquivo `LICENSE` para mais informações.
