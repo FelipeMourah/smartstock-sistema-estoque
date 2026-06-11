@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { AlertCircle, Trash2, Database, Wifi, ShieldCheck, Cloud, Zap } from "lucide-react";
 
 interface SettingsViewProps {
@@ -8,6 +8,33 @@ interface SettingsViewProps {
 
 export default function SettingsView({ onClearData, itemsCount }: SettingsViewProps) {
   const [confirmReset, setConfirmReset] = useState(false);
+  const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null);
+  const [geminiMode, setGeminiMode] = useState<string>("desconhecido");
+  const [mfaEnabled, setMfaEnabled] = useState<boolean | null>(null);
+  const [serverPort, setServerPort] = useState<number | null>(null);
+  const [nodeEnv, setNodeEnv] = useState<string>("desconhecido");
+
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch("/api/settings/status");
+        if (!res.ok) throw new Error("Falha ao consultar estado do servidor");
+        const data = await res.json();
+        setGeminiConfigured(Boolean(data.geminiConfigured));
+        setGeminiMode(data.geminiMode || "desconhecido");
+        setMfaEnabled(Boolean(data.mfaEnabled));
+        setServerPort(Number(data.port) || null);
+        setNodeEnv(data.nodeEnv || "desconhecido");
+      } catch (err) {
+        setGeminiConfigured(false);
+        setGeminiMode("desconhecido");
+        setMfaEnabled(false);
+        setServerPort(null);
+        setNodeEnv("desconhecido");
+      }
+    };
+    fetchStatus();
+  }, []);
 
   const handleReset = () => {
     onClearData();
@@ -95,9 +122,30 @@ export default function SettingsView({ onClearData, itemsCount }: SettingsViewPr
                 <span className="font-bold text-gray-800 block">Chave de API Gemini</span>
                 <span className="text-gray-400 text-[10px] block mt-0.5">Usando proxy robusto server-side.</span>
               </div>
-              <span className="text-[10px] font-bold text-gray-500 bg-gray-50 border border-gray-200 px-2.5 py-0.5 rounded-full">
-                {process.env.GEMINI_API_KEY ? "CONFIGURADA" : "PROXIED (OK)"}
+              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                geminiConfigured ? "text-emerald-600 bg-emerald-50 border border-emerald-100" : "text-gray-500 bg-gray-50 border border-gray-200"
+              }`}>
+                {geminiConfigured === null ? "Verificando..." : geminiConfigured ? "CONFIGURADA" : "NÃO CONFIGURADA"}
               </span>
+            </div>
+            <div className="text-[10px] text-gray-400">
+              {geminiConfigured ? `Modo Gemini configurado: ${geminiMode}` : "O servidor irá usar respostas simuladas se a chave não estiver disponível."}
+            </div>
+
+            <div className="flex justify-between items-center text-xs pt-4 border-t border-gray-50">
+              <div>
+                <span className="font-bold text-gray-800 block">Verificação MFA</span>
+                <span className="text-gray-400 text-[10px] block mt-0.5">Fluxo de autenticação com código de segundo fator.</span>
+              </div>
+              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                mfaEnabled ? "text-emerald-600 bg-emerald-50 border border-emerald-100" : "text-gray-500 bg-gray-50 border border-gray-200"
+              }`}>
+                {mfaEnabled === null ? "Verificando..." : mfaEnabled ? "ATIVADA" : "DESATIVADA"}
+              </span>
+            </div>
+
+            <div className="text-[10px] text-gray-400 mt-2">
+              {serverPort ? `Servidor em execução na porta ${serverPort} (${nodeEnv}).` : `Servidor não disponível ou porta desconhecida. Ambiente: ${nodeEnv}.`}
             </div>
           </div>
         </div>

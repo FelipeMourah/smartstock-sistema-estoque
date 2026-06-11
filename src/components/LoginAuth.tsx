@@ -12,15 +12,81 @@ export default function LoginAuth({ onLoginSuccess, isLoading, setIsLoading }: L
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [name, setName] = useState("");
   const [lastName, setLastName] = useState("");
   const [businessName, setBusinessName] = useState("");
   const [businessType, setBusinessType] = useState("Mercadinho / Mercearia");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [mfaStep, setMfaStep] = useState<"credentials" | "verify">("credentials");
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [mfaCodeInput, setMfaCodeInput] = useState("");
+  const [mfaHint, setMfaHint] = useState("");
+  const [savedAccount, setSavedAccount] = useState<any>(null);
+
+  const validatePassword = (value: string) => {
+    return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/.test(value);
+  };
+
+  const saveLocalAccount = (user: User, emailValue: string, passwordValue: string) => {
+    const localAccount = { email: emailValue, password: passwordValue, user };
+    localStorage.setItem("smartstock_saved_account", JSON.stringify(localAccount));
+    setSavedAccount(localAccount);
+  };
+
+  const getLocalAccount = (emailValue: string, passwordValue: string) => {
+    try {
+      const saved = localStorage.getItem("smartstock_saved_account");
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      if (parsed.email === emailValue && parsed.password === passwordValue) {
+        return parsed.user as User;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const verifyMfaCode = async () => {
+    setError("");
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/verify-mfa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: pendingEmail, code: mfaCodeInput }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Código MFA inválido.");
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        localStorage.setItem("smartstock_user", JSON.stringify(data.user));
+        onLoginSuccess(data.user);
+      }
+    } catch (err: any) {
+      setError(err.message || "Falha ao verificar o MFA.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (mfaStep === "verify") {
+      if (!mfaCodeInput) {
+        setError("Por favor, insira o código MFA.");
+        return;
+      }
+      await verifyMfaCode();
+      return;
+    }
+
     if (!email || !password) {
       setError("Por favor, preencha todos os campos.");
       return;
@@ -41,24 +107,25 @@ export default function LoginAuth({ onLoginSuccess, isLoading, setIsLoading }: L
       }
 
       const data = await res.json();
-      if (data.success) {
-        // Save to offline storage as session persist
+      if (data.success && data.mfaRequired) {
+        setPendingEmail(email);
+        setMfaStep("verify");
+        setMfaHint(data.mfaHint || "Código MFA gerado.");
+        if (data.mfaCode) {
+          setMfaHint(`${data.mfaHint || "Código de 6 dígitos:"} ${data.mfaCode}`);
+        }
+      } else if (data.success && data.user) {
         localStorage.setItem("smartstock_user", JSON.stringify(data.user));
         onLoginSuccess(data.user);
       }
     } catch (err: any) {
-      console.warn("Conexão falhou com o servidor remoto, utilizando login offline resiliente:", err.message);
-      // Resilience offline login fallback: if no server, we let any credentials in for demo purposes
-      const mockUser: User = {
-        id: "offline-user-" + Date.now(),
-        email: email,
-        name: email.split("@")[0],
-        lastName: "Felipe",
-        businessName: "Meu Negócio",
-        businessType: "Mercadinho / Mercearia"
-      };
-      localStorage.setItem("smartstock_user", JSON.stringify(mockUser));
-      onLoginSuccess(mockUser);
+      const localUser = getLocalAccount(email, password);
+      if (localUser) {
+        localStorage.setItem("smartstock_user", JSON.stringify(localUser));
+        onLoginSuccess(localUser);
+      } else {
+        setError(err.message || "Falha ao conectar. Verifique conexão ou credenciais.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -66,10 +133,19 @@ export default function LoginAuth({ onLoginSuccess, isLoading, setIsLoading }: L
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password || !name || !businessName) {
+    if (!email || !password || !passwordConfirm || !name || !businessName) {
       setError("Por favor, preencha todos os campos obrigatórios (*).");
       return;
     }
+    if (password !== passwordConfirm) {
+      setError("A senha e a confirmação devem coincidir.");
+      return;
+    }
+    if (!validatePassword(password)) {
+      setError("A senha deve ter ao menos 8 caracteres, incluir letras maiúsculas, minúsculas, números e símbolos.");
+      return;
+    }
+
     setError("");
     setIsLoading(true);
 
@@ -77,7 +153,7 @@ export default function LoginAuth({ onLoginSuccess, isLoading, setIsLoading }: L
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, name, lastName, businessName, businessType }),
+        body: JSON.stringify({ email, password, passwordConfirm, name, lastName, businessName, businessType }),
       });
 
       if (!res.ok) {
@@ -87,21 +163,12 @@ export default function LoginAuth({ onLoginSuccess, isLoading, setIsLoading }: L
 
       const data = await res.json();
       if (data.success) {
+        saveLocalAccount(data.user, email, password);
         localStorage.setItem("smartstock_user", JSON.stringify(data.user));
         onLoginSuccess(data.user);
       }
     } catch (err: any) {
-      console.warn("Cadastro remoto sem resposta, criando usuário local resiliente:", err.message);
-      const mockUser: User = {
-        id: "offline-user-" + Date.now(),
-        email,
-        name,
-        lastName,
-        businessName,
-        businessType
-      };
-      localStorage.setItem("smartstock_user", JSON.stringify(mockUser));
-      onLoginSuccess(mockUser);
+      setError(err.message || "Falha ao registrar. Tente novamente.");
     } finally {
       setIsLoading(false);
     }
@@ -309,42 +376,104 @@ export default function LoginAuth({ onLoginSuccess, isLoading, setIsLoading }: L
                 />
               </div>
 
-              {/* Password Input */}
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider font-sans">
-                    Senha
-                  </label>
-                  {!isRegistering && (
+              {mfaStep === "verify" ? (
+                <>
+                  <div className="rounded-2xl bg-emerald-50 px-4 py-3 border border-emerald-100 text-emerald-900 text-xs font-medium">
+                    {mfaHint || "Código MFA enviado. Insira abaixo para finalizar o acesso."}
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                      Código MFA
+                    </label>
+                    <input
+                      id="auth-mfa-code"
+                      type="text"
+                      required
+                      autoComplete="one-time-code"
+                      value={mfaCodeInput}
+                      onChange={(e) => setMfaCodeInput(e.target.value.replace(/\D/g, ""))}
+                      placeholder="000000"
+                      maxLength={6}
+                      className="w-full h-11 px-3.5 rounded-xl border border-gray-200 text-gray-800 text-sm focus:outline-none focus:border-emerald-600 transition-colors placeholder:text-gray-300 font-sans"
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-xs text-gray-500">
+                    <span>Seu e-mail de MFA: {pendingEmail || email}</span>
                     <button
                       type="button"
-                      onClick={() => alert("Função em desenvolvimento. Entre com qualquer senha para testar localmente.")}
-                      className="text-emerald-600 hover:text-emerald-700 text-xs font-semibold font-sans"
+                      onClick={() => {
+                        setMfaStep("credentials");
+                        setMfaCodeInput("");
+                        setError("");
+                      }}
+                      className="text-[#1aa275] font-semibold hover:underline"
                     >
-                      Esqueceu a senha?
+                      Voltar
                     </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider font-sans">
+                        Senha
+                      </label>
+                      {!isRegistering && (
+                        <button
+                          type="button"
+                          onClick={() => alert("Função em desenvolvimento. Entre com qualquer senha para testar localmente.")}
+                          className="text-emerald-600 hover:text-emerald-700 text-xs font-semibold font-sans"
+                        >
+                          Esqueceu a senha?
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input
+                        id="auth-password"
+                        type={showPassword ? "text" : "password"}
+                        required
+                        minLength={isRegistering ? 8 : 1}
+                        placeholder={isRegistering ? "Mínimo 8 caracteres" : "••••••••"}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full h-11 pl-3.5 pr-10 rounded-xl border border-gray-200 text-gray-800 text-sm focus:outline-none focus:border-emerald-600 transition-colors placeholder:text-gray-300 font-sans"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isRegistering && (
+                    <>
+                      <div>
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                          Confirmar Senha
+                        </label>
+                        <input
+                          id="auth-password-confirm"
+                          type={showPassword ? "text" : "password"}
+                          required
+                          minLength={8}
+                          placeholder="Repita sua senha"
+                          value={passwordConfirm}
+                          onChange={(e) => setPasswordConfirm(e.target.value)}
+                          className="w-full h-11 px-3.5 rounded-xl border border-gray-200 text-gray-800 text-sm focus:outline-none focus:border-emerald-600 transition-colors placeholder:text-gray-300 font-sans"
+                        />
+                      </div>
+                      <div className="rounded-2xl bg-emerald-50 px-4 py-3 border border-emerald-100 text-emerald-900 text-[11px] leading-snug">
+                        A senha deve ter ao menos 8 caracteres, incluir letras maiúsculas, minúsculas, números e símbolos especiais.
+                      </div>
+                    </>
                   )}
-                </div>
-                <div className="relative">
-                  <input
-                    id="auth-password"
-                    type={showPassword ? "text" : "password"}
-                    required
-                    minLength={isRegistering ? 8 : 1}
-                    placeholder={isRegistering ? "Mínimo 8 caracteres" : "••••••••"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full h-11 pl-3.5 pr-10 rounded-xl border border-gray-200 text-gray-800 text-sm focus:outline-none focus:border-emerald-600 transition-colors placeholder:text-gray-300 font-sans"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </div>
+                </>
+              )}
 
               {/* Form submit button styled EXACTLY like the user's screenshots (rich teal/green) */}
               <button
@@ -371,6 +500,9 @@ export default function LoginAuth({ onLoginSuccess, isLoading, setIsLoading }: L
                       onClick={() => {
                         setIsRegistering(false);
                         setError("");
+                        setMfaStep("credentials");
+                        setMfaCodeInput("");
+                        setMfaHint("");
                       }}
                       className="text-[#1aa275] font-bold hover:underline"
                     >
@@ -385,6 +517,9 @@ export default function LoginAuth({ onLoginSuccess, isLoading, setIsLoading }: L
                       onClick={() => {
                         setIsRegistering(true);
                         setError("");
+                        setMfaStep("credentials");
+                        setMfaCodeInput("");
+                        setMfaHint("");
                       }}
                       className="text-[#1aa275] font-bold hover:underline"
                     >

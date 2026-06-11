@@ -27,6 +27,21 @@ export default function AIChatSupport() {
     }
   }, [messages, isOpen]);
 
+  useEffect(() => {
+    const savedHistory = localStorage.getItem("smartstock_chat_history");
+    if (savedHistory) {
+      try {
+        setMessages(JSON.parse(savedHistory));
+      } catch {
+        localStorage.removeItem("smartstock_chat_history");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("smartstock_chat_history", JSON.stringify(messages));
+  }, [messages]);
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || isLoading) return;
@@ -41,7 +56,8 @@ export default function AIChatSupport() {
       timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setIsLoading(true);
 
     try {
@@ -50,7 +66,7 @@ export default function AIChatSupport() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, userMessage].map(m => ({ sender: m.sender, text: m.text }))
+          messages: updatedMessages.map(m => ({ sender: m.sender, text: m.text }))
         })
       });
 

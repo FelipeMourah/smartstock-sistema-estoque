@@ -12,12 +12,14 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [streamActive, setStreamActive] = useState(false);
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
+  const [cameraSupported, setCameraSupported] = useState<boolean>(true);
 
   // Simulation / Custom inputs state
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [isVisionLoading, setIsVisionLoading] = useState(false);
   const [gallery, setGallery] = useState<Array<{id: string; src: string; rotation?: number; note?: string}>>([]);
   const [audioPermissionGranted, setAudioPermissionGranted] = useState<boolean | null>(null);
+  const [cameraErrorMessage, setCameraErrorMessage] = useState<string | null>(null);
 
   // Vision results
   const [visionResponse, setVisionResponse] = useState<any[] | null>(null);
@@ -27,11 +29,13 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
     { name: "Óleo de Soja 900ml", quantity: 12, category: "Alimentação" }
   ]);
 
-  // Voice command states
+  // Audio / Voice (desabilitado para foco em câmera e upload)
+  // Mantido apenas como placeholders para não quebrar layout/state externos.
   const [isListeningVoice, setIsListeningVoice] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [voiceIsLoading, setVoiceIsLoading] = useState(false);
   const [voiceFeedbackText, setVoiceFeedbackText] = useState("");
+
 
   // Simulated preset pictures matching Image 5 logic for robust demoing
   // (Removed - no longer needed)
@@ -41,13 +45,20 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
 
   // Try opening physical webcam on mount as progressive enhancement
   const startCamera = async () => {
+    setCameraErrorMessage(null);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraSupported(false);
+      setCameraPermissionGranted(false);
+      setStreamActive(false);
+      setCameraErrorMessage("Seu navegador não suporta acesso à câmera ou não está sendo executado em um contexto seguro.");
+      return;
+    }
+
     try {
-      if (videoRef.current) {
-        // Stop current active stream first
-        if (videoRef.current.srcObject) {
-          const stream = videoRef.current.srcObject as MediaStream;
-          stream.getTracks().forEach(track => track.stop());
-        }
+      setCameraSupported(true);
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -55,14 +66,24 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
       });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        videoRef.current.autoplay = true;
+        videoRef.current.muted = true;
+        const playPromise = videoRef.current.play();
+        if (playPromise && typeof playPromise.then === "function") {
+          playPromise.catch((playError) => {
+            console.warn("Falha ao iniciar reprodução de vídeo automático:", playError);
+          });
+        }
         setStreamActive(true);
         setCameraPermissionGranted(true);
-        // Clear static files to emphasize raw videocamera stream is rolling
         setUploadedImage(null);
       }
-    } catch (err) {
-      console.warn("Câmera indisponível no browser do iframe, usando simulação assistida sofisticada:", err);
+    } catch (err: any) {
+      console.warn("Falha ao ativar câmera:", err);
+      const errorMessage = err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError"
+        ? "Permissão de câmera negada. Liberte o acesso nas configurações do navegador."
+        : err?.message || "Não foi possível acessar a câmera.";
+      setCameraErrorMessage(errorMessage);
       setCameraPermissionGranted(false);
       setStreamActive(false);
     }
@@ -78,8 +99,10 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
   };
 
   useEffect(() => {
-    // Open webcam initially, handle exceptions cleanly
-    startCamera();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraSupported(false);
+      setCameraErrorMessage("Seu navegador não suporta captura de vídeo ou não está sendo executado em um contexto seguro.");
+    }
     return () => {
       stopCamera();
     };
@@ -121,18 +144,23 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
   };
 
   const requestAudioPermission = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert("Seu navegador não suporta captura de áudio via WebRTC nesta aba. Use o recurso de voz offline ou um navegador compatível.");
+      setAudioPermissionGranted(false);
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // stop tracks immediately - we only asked for permission
-      stream.getTracks().forEach((t) => t.stop());
+      stream.getTracks().forEach((track) => track.stop());
       setAudioPermissionGranted(true);
-      alert("Microfone ativado no navegador.");
-    } catch (err) {
-      console.warn("Permissão de áudio negada:", err);
+      startSpeechRecognition();
+    } catch (err: any) {
       setAudioPermissionGranted(false);
-      alert("Não foi possível ativar o microfone. Verifique permissões do navegador.");
+      alert("Não foi possível obter permissão de áudio. Verifique o microfone e tente novamente.");
     }
   };
+
 
   // Vision analyzer triggers express endpoint
   const analyzeWithVision = async () => {
@@ -286,15 +314,15 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
             {/* Viewport frame matching Image 5 */}
             <div className="w-full aspect-video bg-[#0b1b24] rounded-xl overflow-hidden relative flex flex-col items-center justify-center border border-gray-100">
               
-              {streamActive ? (
-                /* Native Webcam Stream running */
-                <video 
-                  ref={videoRef}
-                  className="w-full h-full object-cover scale-x-[-1]"
-                  playsInline
-                  muted
-                />
-              ) : uploadedImage ? (
+              <video
+                ref={videoRef}
+                className={`w-full h-full object-cover scale-x-[-1] ${streamActive ? "block" : "hidden"}`}
+                autoPlay
+                playsInline
+                muted
+              />
+
+              {!streamActive && uploadedImage ? (
                 /* Simulated uploaded photo */
                 <img 
                   src={uploadedImage} 
@@ -302,7 +330,9 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
                 />
-              ) : (
+              ) : null}
+
+              {!streamActive && !uploadedImage ? (
                 /* Uninitialized placeholder display */
                 <div className="text-center p-6 text-gray-400">
                   <div className="w-12 h-12 bg-emerald-950/20 border border-emerald-800/25 rounded-2xl flex items-center justify-center text-[#1aa275] mx-auto mb-3.5">
@@ -311,7 +341,7 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
                   <h4 className="text-gray-200 font-bold text-xs">Câmera pronta</h4>
                   <p className="text-gray-500 text-[10px] max-w-xs mt-1">Clique para iniciar ou escolha uma foto para demonstração visual abaixo</p>
                 </div>
-              )}
+              ) : null}
 
               {/* Action buttons embedded in bottom center of frame */}
               <div className="absolute bottom-4 left-0 right-0 flex items-center justify-center gap-2 px-4 z-10">
@@ -326,10 +356,11 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
                 ) : (
                   <button
                     onClick={startCamera}
-                    className="h-8 px-4 text-xs font-bold text-white bg-[#0e2c3d] hover:bg-[#11354a] border border-[#16445c] rounded-lg shadow-lg flex items-center gap-1.5 cursor-pointer"
+                    disabled={!cameraSupported}
+                    className={`h-8 px-4 text-xs font-bold text-white rounded-lg shadow-lg flex items-center gap-1.5 transition-all ${cameraSupported ? "bg-[#0e2c3d] hover:bg-[#11354a] border border-[#16445c] cursor-pointer" : "bg-gray-300 text-gray-600 border border-gray-200 cursor-not-allowed"}`}
                   >
                     <RefreshCw size={12} />
-                    <span>Ligar Webcam</span>
+                    <span>{cameraSupported ? "Ligar Webcam" : "Webcam indisponível"}</span>
                   </button>
                 )}
 
@@ -363,21 +394,27 @@ export default function CameraIA({ onUpdateInventory }: CameraIAProps) {
 
               </div>
 
-              {/* Scanning visual sweep line animation */}
-              {isVisionLoading && (
-                <div className="absolute inset-x-0 h-1.5 bg-emerald-400/80 shadow-md shadow-emerald-400 blur-[1px] animate-bounce top-0 pointer-events-none" />
+              {cameraErrorMessage && (
+                <div className="mt-4 rounded-2xl bg-rose-50 border border-rose-100 p-3 text-rose-800 text-[11px]">
+                  {cameraErrorMessage}
+                </div>
+              )}
+              {!cameraSupported && (
+                <div className="mt-4 rounded-2xl bg-yellow-50 border border-yellow-100 p-3 text-yellow-700 text-[11px]">
+                  A câmera não está disponível neste navegador. Utilize upload de imagem ou acesse este app em um navegador moderno compatível com WebRTC.
+                </div>
               )}
 
-              {/* Status pill overlay */}
-              <div className="absolute top-4 left-4 z-10">
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1 text-[9px] font-bold rounded-full ${
-                  streamActive ? "bg-emerald-500/25 text-emerald-400 border border-emerald-400/30" : "bg-gray-600/45 text-gray-300 border border-gray-600/20"
-                }`}>
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-semibold ${
+                    streamActive ? "bg-emerald-500/25 text-emerald-400 border border-emerald-400/30" : "bg-gray-600/45 text-gray-300 border border-gray-600/20"
+                  }`}
+                >
                   <span className={`w-1.5 h-1.5 rounded-full ${streamActive ? "bg-emerald-400 animate-ping" : "bg-gray-400"}`} />
                   {streamActive ? "Webcam ao vivo" : "Arquivo/Simulado"}
                 </span>
               </div>
-
             </div>
 
             {/* Hidden canvas tool for webcam snapping */}

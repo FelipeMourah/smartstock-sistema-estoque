@@ -34,7 +34,7 @@ export default function App() {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [items]);
+  }, []);
 
   // Load user session on startup
   useEffect(() => {
@@ -42,7 +42,7 @@ export default function App() {
     if (savedUser) {
       try {
         setUser(JSON.parse(savedUser));
-      } catch (err) {
+      } catch {
         localStorage.removeItem("smartstock_user");
       }
     }
@@ -50,6 +50,8 @@ export default function App() {
     // Load initial inventory
     loadInventory();
   }, []);
+
+
 
   const loadInventory = async () => {
     setIsLoading(true);

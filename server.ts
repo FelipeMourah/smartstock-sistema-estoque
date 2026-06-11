@@ -1,8 +1,17 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
+import sqlite3 from "sqlite3";
+import { open, Database as SqliteDatabase } from "sqlite";
 import { GoogleGenAI, Type } from "@google/genai";
+
+dotenv.config();
+
+const PORT = Number(process.env.PORT) || 3000;
+const MFA_TIMEOUT_SECONDS = Number(process.env.MFA_TIMEOUT_SECONDS) || 300;
+const mfaCodes: Record<string, { code: string; expiresAt: number }> = {};
 
 // Ensure data folder exists
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -10,9 +19,9 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const DB_FILE = path.join(DATA_DIR, "db.json");
+const DB_PATH = path.join(DATA_DIR, "db.sqlite");
+let sqlite: SqliteDatabase | null = null;
 
-// Structure of our mock cloud DB file
 interface DbSchema {
   users: any[];
   items: any[];
@@ -20,62 +29,135 @@ interface DbSchema {
   chats: any[];
 }
 
-function readDb(): DbSchema {
-  if (!fs.existsSync(DB_FILE)) {
-    const defaultDb: DbSchema = {
-      users: [
-        {
-          id: "demo-user",
-          email: "joao@email.com",
-          name: "João",
-          lastName: "Silva",
-          businessName: "Mercadinho do João",
-          businessType: "Mercadinho / Mercearia"
-        }
-      ],
-      items: [
-        { id: "1", name: "Arroz Tio João 5kg", category: "Grãos", stock: 2, minStock: 10, lastScan: "Hoje 09:14", status: "Crítico" },
-        { id: "2", name: "Óleo de Soja 900ml", category: "Alimentação", stock: 5, minStock: 8, lastScan: "Hoje 09:14", status: "Baixo" },
-        { id: "3", name: "Refrigerante 2L", category: "Bebidas", stock: 120, minStock: 20, lastScan: "Ontem 17:30", status: "Ok" },
-        { id: "4", name: "Água Mineral 500ml", category: "Bebidas", stock: 98, minStock: 30, lastScan: "Ontem 17:30", status: "Ok" },
-        { id: "5", name: "Sabão em Pó 1kg", category: "Limpeza", stock: 1, minStock: 5, lastScan: "Hoje 09:15", status: "Crítico" },
-        { id: "6", name: "Biscoito Recheado", category: "Mercearia", stock: 80, minStock: 15, lastScan: "02/04 14:22", status: "Ok" },
-        { id: "7", name: "Leite Integral 1L", category: "Laticínios", stock: 66, minStock: 12, lastScan: "02/04 14:22", status: "Ok" },
-        { id: "8", name: "Feijão Carioca 1kg", category: "Grãos", stock: 3, minStock: 10, lastScan: "Hoje 09:15", status: "Baixo" },
-        { id: "9", name: "Açúcar Cristal 1kg", category: "Grãos", stock: 50, minStock: 10, lastScan: "01/04 11:00", status: "Ok" }
-      ],
-      scans: [
-        {
-          id: "scan1",
-          timestamp: "Hoje 09:14",
-          itemsDetected: [
-            { name: "Arroz 5kg (fardo)", category: "Grãos", quantity: 10 },
-            { name: "Feijão 1kg", category: "Grãos", quantity: 6 },
-            { name: "Óleo 900ml", category: "Alimentação", quantity: 12 }
-          ]
-        }
-      ],
-      chats: []
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(defaultDb, null, 2), "utf-8");
-    return defaultDb;
+async function initializeDatabase() {
+  sqlite = await open({ filename: DB_PATH, driver: sqlite3.Database });
+  await sqlite.exec("PRAGMA journal_mode = WAL;");
+
+  await sqlite.exec(`CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    name TEXT NOT NULL,
+    lastName TEXT,
+    businessName TEXT NOT NULL,
+    businessType TEXT NOT NULL
+  )`);
+
+  await sqlite.exec(`CREATE TABLE IF NOT EXISTS items (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    stock INTEGER NOT NULL,
+    minStock INTEGER NOT NULL,
+    lastScan TEXT NOT NULL,
+    status TEXT NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  await sqlite.exec(`CREATE TABLE IF NOT EXISTS scans (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    itemsDetected TEXT NOT NULL
+  )`);
+
+  await sqlite.exec(`CREATE TABLE IF NOT EXISTS chats (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL
+  )`);
+
+  const userCountRow: any = await sqlite.get("SELECT COUNT(*) as count FROM users");
+  const userCount = userCountRow?.count || 0;
+  if (userCount === 0) {
+    await sqlite.run(`INSERT INTO users (id, email, password, name, lastName, businessName, businessType) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      "demo-user", "joao@email.com", "SmartStock123!", "João", "Silva", "Mercadinho do João", "Mercadinho / Mercearia");
   }
-  try {
-    const content = fs.readFileSync(DB_FILE, "utf-8");
-    return JSON.parse(content);
-  } catch (err) {
-    console.error("Erro ao ler DB, resetando...", err);
-    return { users: [], items: [], scans: [], chats: [] };
+
+  const itemCountRow: any = await sqlite.get("SELECT COUNT(*) as count FROM items");
+  const itemCount = itemCountRow?.count || 0;
+  if (itemCount === 0) {
+    const initialItems = [
+      ["1", "Arroz Tio João 5kg", "Grãos", 2, 10, "Hoje 09:14", "Crítico", 1],
+      ["2", "Óleo de Soja 900ml", "Alimentação", 5, 8, "Hoje 09:14", "Baixo", 1],
+      ["3", "Refrigerante 2L", "Bebidas", 120, 20, "Ontem 17:30", "Ok", 1],
+      ["4", "Água Mineral 500ml", "Bebidas", 98, 30, "Ontem 17:30", "Ok", 1],
+      ["5", "Sabão em Pó 1kg", "Limpeza", 1, 5, "Hoje 09:15", "Crítico", 1],
+      ["6", "Biscoito Recheado", "Mercearia", 80, 15, "02/04 14:22", "Ok", 1],
+      ["7", "Leite Integral 1L", "Laticínios", 66, 12, "02/04 14:22", "Ok", 1],
+      ["8", "Feijão Carioca 1kg", "Grãos", 3, 10, "Hoje 09:15", "Baixo", 1],
+      ["9", "Açúcar Cristal 1kg", "Grãos", 50, 10, "01/04 11:00", "Ok", 1]
+    ];
+    await sqlite.run('BEGIN TRANSACTION');
+    try {
+      for (const row of initialItems) {
+        await sqlite.run(`INSERT INTO items (id, name, category, stock, minStock, lastScan, status, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, ...row as any);
+      }
+      await sqlite.run('COMMIT');
+    } catch (e) {
+      await sqlite.run('ROLLBACK');
+      throw e;
+    }
+  }
+
+  const scanCountRow: any = await sqlite.get("SELECT COUNT(*) as count FROM scans");
+  const scanCount = scanCountRow?.count || 0;
+  if (scanCount === 0) {
+    await sqlite.run(`INSERT INTO scans (id, timestamp, itemsDetected) VALUES (?, ?, ?)`,
+      "scan1",
+      "Hoje 09:14",
+      JSON.stringify([
+        { name: "Arroz 5kg (fardo)", category: "Grãos", quantity: 10 },
+        { name: "Feijão 1kg", category: "Grãos", quantity: 6 },
+        { name: "Óleo 900ml", category: "Alimentação", quantity: 12 }
+      ])
+    );
   }
 }
 
-function writeDb(data: DbSchema) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+async function readDb(): Promise<DbSchema> {
+  if (!sqlite) throw new Error('Database not initialized');
+  const users = await sqlite.all("SELECT * FROM users");
+  const items = await sqlite.all("SELECT * FROM items");
+  const scansRows = await sqlite.all("SELECT * FROM scans ORDER BY rowid DESC");
+  const scans = scansRows.map((row: any) => ({ ...row, itemsDetected: JSON.parse(row.itemsDetected) }));
+  const chatsRows = await sqlite.all("SELECT * FROM chats ORDER BY rowid DESC");
+  const chats = chatsRows.map((row: any) => ({ ...row, content: JSON.parse(row.content) }));
+  return { users, items, scans, chats };
 }
+
+async function writeDb(data: DbSchema) {
+  if (!sqlite) throw new Error('Database not initialized');
+  const { users = [], items = [], scans = [], chats = [] } = data;
+  await sqlite.run('BEGIN TRANSACTION');
+  try {
+    await sqlite.run("DELETE FROM users");
+    await sqlite.run("DELETE FROM items");
+    await sqlite.run("DELETE FROM scans");
+    await sqlite.run("DELETE FROM chats");
+
+    for (const user of users) {
+      await sqlite.run(`INSERT INTO users (id, email, password, name, lastName, businessName, businessType) VALUES (?, ?, ?, ?, ?, ?, ?)`, user.id, user.email, user.password, user.name, user.lastName || "", user.businessName, user.businessType);
+    }
+    for (const item of items) {
+      await sqlite.run(`INSERT INTO items (id, name, category, stock, minStock, lastScan, status, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, item.id, item.name, item.category, Number(item.stock), Number(item.minStock), item.lastScan, item.status, item.synced ? 1 : 0);
+    }
+    for (const scan of scans) {
+      await sqlite.run(`INSERT INTO scans (id, timestamp, itemsDetected) VALUES (?, ?, ?)`, scan.id, scan.timestamp, JSON.stringify(scan.itemsDetected || []));
+    }
+    for (const chat of chats) {
+      await sqlite.run(`INSERT INTO chats (id, content) VALUES (?, ?)`, chat.id, JSON.stringify(chat.content || {}));
+    }
+
+    await sqlite.run('COMMIT');
+  } catch (e) {
+    await sqlite.run('ROLLBACK');
+    throw e;
+  }
+}
+
+// Database will be initialized before server start via promise chain below.
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
 
   // Middleware
   app.use(express.json({ limit: "50mb" }));
@@ -103,13 +185,24 @@ async function startServer() {
   // --- API ROUTES ---
 
   // Auth: Registrar
-  app.post("/api/auth/register", (req, res) => {
-    const { email, password, name, lastName, businessName, businessType } = req.body;
-    if (!email || !password || !name) {
+  app.post("/api/auth/register", async (req, res) => {
+    const { email, password, passwordConfirm, name, lastName, businessName, businessType } = req.body;
+    if (!email || !password || !passwordConfirm || !name || !businessName) {
       return res.status(400).json({ error: "Campos obrigatórios faltando" });
     }
 
-    const db = readDb();
+    if (password !== passwordConfirm) {
+      return res.status(400).json({ error: "A confirmação de senha não corresponde." });
+    }
+
+    const passwordPolicy = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/;
+    if (!passwordPolicy.test(password)) {
+      return res.status(400).json({
+        error: "A senha deve ter ao menos 8 caracteres, incluir maiúscula, minúscula, número e caractere especial."
+      });
+    }
+
+    const db = await readDb();
     const existing = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
     if (existing) {
       return res.status(400).json({ error: "E-mail já cadastrado" });
@@ -118,6 +211,7 @@ async function startServer() {
     const newUser = {
       id: "user-" + Date.now(),
       email,
+      password,
       name,
       lastName: lastName || "",
       businessName: businessName || "Minha Empresa",
@@ -125,35 +219,48 @@ async function startServer() {
     };
 
     db.users.push(newUser);
-    writeDb(db);
+    await writeDb(db);
 
-    res.json({ success: true, user: newUser });
+    res.json({ success: true, user: { ...newUser, password: undefined } });
   });
 
   // Auth: Login
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
-    const db = readDb();
+    if (!email || !password) {
+      return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
+    }
+
+    const db = await readDb();
     const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
 
-    if (!user) {
+    if (!user || user.password !== password) {
       return res.status(401).json({ error: "E-mail ou senha inválidos" });
     }
 
-    // Aceita qualquer senha para testabilidade do projeto acadêmico
-    res.json({ success: true, user });
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + MFA_TIMEOUT_SECONDS * 1000;
+    mfaCodes[email.toLowerCase()] = { code, expiresAt };
+
+    res.json({
+      success: true,
+      mfaRequired: true,
+      message: "Código MFA gerado. Use o código fornecido para concluir o login.",
+      mfaHint: `Insira o código SMS/Authenticator de 6 dígitos. Válido por ${MFA_TIMEOUT_SECONDS / 60} minutos.`,
+      mfaCode: code
+    });
   });
 
   // Items: Get all
-  app.get("/api/inventory", (req, res) => {
-    const db = readDb();
+  app.get("/api/inventory", async (req, res) => {
+    const db = await readDb();
     res.json(db.items);
   });
 
   // Items: Sync bulk (syncs offline items to cloud)
-  app.post("/api/inventory/sync", (req, res) => {
+  app.post("/api/inventory/sync", async (req, res) => {
     const clientItems = req.body.items || [];
-    const db = readDb();
+    const db = await readDb();
     
     // Merge algorithm - we overwrite or append
     clientItems.forEach((cItem: any) => {
@@ -168,17 +275,17 @@ async function startServer() {
       }
     });
 
-    writeDb(db);
+    await writeDb(db);
     res.json({ success: true, items: db.items });
   });
 
   // Items: Save single
-  app.post("/api/inventory/save", (req, res) => {
+  app.post("/api/inventory/save", async (req, res) => {
     const item = req.body;
     if (!item.name) {
       return res.status(400).json({ error: "Nome do produto é obrigatório" });
     }
-    const db = readDb();
+    const db = await readDb();
     const status = item.stock <= 0 ? "Crítico" : item.stock <= item.minStock ? "Baixo" : "Ok";
     const newItem = {
       id: item.id || "item-" + Date.now(),
@@ -197,30 +304,79 @@ async function startServer() {
       db.items.push(newItem);
     }
 
-    writeDb(db);
+    await writeDb(db);
     res.json({ success: true, item: newItem, items: db.items });
   });
 
+  // AI: Gemini status (exposed safely server-side only)
+  app.get("/api/ai/status", (_req, res) => {
+    res.json({
+      geminiConfigured: !!process.env.GEMINI_API_KEY,
+      geminiMode: process.env.GEMINI_API_KEY ? "real" : "simulated",
+    });
+  });
+
+  app.get("/api/settings/status", (_req, res) => {
+    res.json({
+      geminiConfigured: !!process.env.GEMINI_API_KEY,
+      geminiMode: process.env.GEMINI_API_KEY ? "real" : "simulated",
+      mfaEnabled: true,
+      port: PORT,
+      nodeEnv: process.env.NODE_ENV || "development"
+    });
+  });
+
+  app.get("/api/health", (_req, res) => {
+    res.json({ success: true, status: "Healthy", nodeEnv: process.env.NODE_ENV || "development", port: PORT });
+  });
+
+  // Auth: Verify MFA code
+  app.post("/api/auth/verify-mfa", async (req, res) => {
+    const { email, code } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({ error: "E-mail e código MFA são obrigatórios." });
+    }
+
+    const record = mfaCodes[email.toLowerCase()];
+    if (!record || record.code !== code) {
+      return res.status(401).json({ error: "Código MFA inválido ou expirado." });
+    }
+
+    if (Date.now() > record.expiresAt) {
+      delete mfaCodes[email.toLowerCase()];
+      return res.status(401).json({ error: "Código MFA expirado." });
+    }
+
+    delete mfaCodes[email.toLowerCase()];
+    const db = await readDb();
+    const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!user) {
+      return res.status(401).json({ error: "Usuário não encontrado para MFA." });
+    }
+
+    res.json({ success: true, user: { ...user, password: undefined } });
+  });
+
   // Items: Delete
-  app.delete("/api/inventory/:id", (req, res) => {
+  app.delete("/api/inventory/:id", async (req, res) => {
     const { id } = req.params;
-    const db = readDb();
+    const db = await readDb();
     db.items = db.items.filter(i => i.id !== id);
-    writeDb(db);
+    await writeDb(db);
     res.json({ success: true, items: db.items });
   });
 
   // Developer endpoints to read and write the database file directly
-  app.get("/api/developer/db", (req, res) => {
+  app.get("/api/developer/db", async (req, res) => {
     try {
-      const db = readDb();
+      const db = await readDb();
       res.json(db);
     } catch (err: any) {
       res.status(500).json({ error: "Erro ao ler banco de dados", details: err.message });
     }
   });
 
-  app.post("/api/developer/db", (req, res) => {
+  app.post("/api/developer/db", async (req, res) => {
     try {
       const dbContent = req.body;
       if (!dbContent.items || !dbContent.users) {
@@ -236,7 +392,7 @@ async function startServer() {
   // AI: Vision Image Scanner for stocking
   app.post("/api/ai/vision", async (req, res) => {
     const { image, simulateTag } = req.body;
-    const db = readDb();
+    const db = await readDb();
 
     // Simulated responses if no gemini API key is configured or user chose simulate mode
     const simulatedDetections: Record<string, any[]> = {
@@ -290,7 +446,7 @@ async function startServer() {
           });
         }
       });
-      writeDb(db);
+      await writeDb(db);
       return res.json({ success: true, itemsDetected: currentScan.itemsDetected, inventory: db.items });
     }
 
@@ -323,7 +479,7 @@ async function startServer() {
           });
         }
       });
-      writeDb(db);
+      await writeDb(db);
       return res.json({ 
         success: true, 
         message: "Operando em modo simulação (Sem Chave API)", 
@@ -418,7 +574,7 @@ async function startServer() {
         }
       });
 
-      writeDb(db);
+      await writeDb(db);
       res.json({ success: true, itemsDetected: currentScan.itemsDetected, inventory: db.items });
     } catch (err: any) {
       console.error("Erro na visão computacional Gemini:", err);
@@ -433,7 +589,7 @@ async function startServer() {
       return res.status(400).json({ error: "Transcrição vazia" });
     }
 
-    const db = readDb();
+    const db = await readDb();
 
     // Fallback parser function if Gemini is offline
     function simpleLocalVoiceParser(text: string) {
@@ -491,7 +647,7 @@ async function startServer() {
           status: "Ok"
         });
       }
-      writeDb(db);
+      await writeDb(db);
       return res.json({
         success: true,
         message: "Processado localmente (Sem Chave API)",
@@ -553,7 +709,7 @@ async function startServer() {
         });
       }
 
-      writeDb(db);
+      await writeDb(db);
       res.json({ success: true, parsedCommand: parsed, inventory: db.items });
     } catch (err: any) {
       console.error("Erro no interpretador por voz:", err);
@@ -570,7 +726,7 @@ async function startServer() {
       return res.status(400).json({ error: "Mensagens inválidas" });
     }
 
-    const db = readDb();
+    const db = await readDb();
     
     // We send current stock summaries to the chatbot so it has access to real context!
     const criticalItems = db.items.filter(i => i.status === "Crítico").map(i => `${i.name} (estoque: ${i.stock})`).join(", ");
@@ -635,7 +791,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", async (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
@@ -645,4 +801,9 @@ async function startServer() {
   });
 }
 
-startServer();
+initializeDatabase()
+  .then(() => startServer())
+  .catch(err => {
+    console.error('Failed to initialize database or start server:', err);
+    process.exit(1);
+  });
