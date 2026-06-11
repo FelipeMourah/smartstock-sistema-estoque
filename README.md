@@ -1,6 +1,6 @@
 # 📦 SmartStock
 
-![Status](https://img.shields.io/badge/status-em%20desenvolvimento-blue)
+![Status](https://img.shields.io/badge/status-concluído-brightgreen)
 ![React](https://img.shields.io/badge/React-18-61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6)
 ![SQLite](https://img.shields.io/badge/SQLite-Local-003B57)
